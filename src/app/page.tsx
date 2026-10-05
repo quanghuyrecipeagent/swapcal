@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import Nav from "@/components/Nav";
 import ItemPicker from "@/components/ItemPicker";
 import MacroRow, { Delta } from "@/components/MacroRow";
+import GramsToday, { projectedTiers } from "@/components/GramsToday";
+import { useGramsToday } from "@/lib/grams";
 import { useLibrary } from "@/lib/data";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -13,6 +15,7 @@ import {
   round,
   roundMacros,
   toGramsEntry,
+  ZERO,
   toPlainText,
   type CalcState,
   type Line,
@@ -33,6 +36,11 @@ export default function CalculatorPage() {
   const [swapFor, setSwapFor] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
+  const [logged, setLogged] = useState(false);
+  const grams = useGramsToday();
+
+  // any change after logging is a new meal again
+  useEffect(() => setLogged(false), [state]);
 
   useEffect(() => {
     if (!state.baseId && bases.length) setState(fresh(bases[0].id, 1));
@@ -53,11 +61,17 @@ export default function CalculatorPage() {
       return { ...s, edits };
     });
 
+  // adding something that's already there adds another serving instead of a second line
   const addExtra = (item: Item) =>
-    setState((s) => ({
-      ...s,
-      extras: [...s.extras, { key: crypto.randomUUID(), itemId: item.id, amount: item.serving_size }],
-    }));
+    setState((s) => {
+      const existing = s.extras.find((x) => x.itemId === item.id);
+      if (existing)
+        return {
+          ...s,
+          extras: s.extras.map((x) => (x.key === existing.key ? { ...x, amount: x.amount + item.serving_size } : x)),
+        };
+      return { ...s, extras: [...s.extras, { key: crypto.randomUUID(), itemId: item.id, amount: item.serving_size }] };
+    });
 
   const setExtraAmount = (key: string, amount: number) =>
     setState((s) => ({ ...s, extras: s.extras.map((x) => (x.key === key ? { ...x, amount } : x)) }));
@@ -83,7 +97,20 @@ export default function CalculatorPage() {
     }
     const { error } = await sb.from("food_entries").insert(toGramsEntry(result, state, data.user.id));
     setLogging(false);
-    flash(error ? `Couldn't log: ${error.message}` : "Logged to today in GRAMS");
+    if (error) return flash(`Couldn't log: ${error.message}`);
+    flash("Logged to today in GRAMS");
+    await grams.refresh();
+    setLogged(true);
+  }
+
+  // allowed swaps for an ingredient in the current base; the original is offered back once swapped
+  function swapOptionsFor(originalId: string, currentId: string): string[] {
+    const base = bases.find((b) => b.id === state.baseId);
+    const ids = (base?.swaps ?? [])
+      .filter((w) => w.item_id === originalId)
+      .sort((a, b) => a.position - b.position)
+      .map((w) => w.swap_id);
+    return [...(currentId !== originalId ? [originalId] : []), ...ids].filter((id) => id !== currentId);
   }
 
   if (loading) return <Shell><p className="text-muted">Loading your library…</p></Shell>;
@@ -104,11 +131,16 @@ export default function CalculatorPage() {
   const componentLines = result?.lines.filter((l) => l.status !== "added") ?? [];
   const extraLines = result?.lines.filter((l) => l.status === "added") ?? [];
   const p = result ? roundMacros(result.portion) : null;
+  const meal = result && !logged ? result.portion : ZERO;
+  const tiers = projectedTiers(grams.eaten, meal, grams.goals);
+  const calTier = tiers.calories;
+  const heroStyle = calTier ? { background: `var(--over-bg-${calTier})`, color: "#fff" } : undefined;
+  const calOver = grams.goals ? Math.round(grams.eaten.calories + meal.calories - grams.goals.calories) : 0;
 
   return (
     <Shell>
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        <div className="space-y-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-6">
           {/* Base + portion */}
           <section className="card p-4 sm:p-5">
             <div className="flex flex-wrap items-end gap-3">
@@ -168,6 +200,14 @@ export default function CalculatorPage() {
                       baseFirst
                       items={items}
                       defaultKind={l.original?.item.kind ?? l.item.kind}
+                      pinnedIds={swapOptionsFor(l.original?.item.id ?? l.item.id, l.item.id)}
+                      pinnedLabel="Swap options"
+                      emptyPinnedHint={
+                        <>
+                          No swap options set for {l.original?.item.name ?? l.item.name} in this base yet.{" "}
+                          <Link href="/library" className="text-accent underline">Add some in the library</Link>, or pick from the whole library.
+                        </>
+                      }
                       exclude={[l.item.id]}
                       onPick={(it) => {
                         const origId = l.original?.item.id;
@@ -229,10 +269,10 @@ export default function CalculatorPage() {
         </div>
 
         {/* Summary */}
-        <aside id="summary" className="pb-20 lg:sticky lg:top-20 lg:self-start lg:pb-0">
+        <aside id="summary" className="space-y-4 pb-20 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto lg:pb-0">
           {result && p && (
             <div className="card overflow-hidden">
-              <div className="bg-ink p-5 text-bg">
+              <div className="bg-ink p-5 text-bg transition-colors" style={heroStyle}>
                 <div className="text-xs uppercase tracking-wider opacity-70">
                   {fmtAmount(state.portion)} of {fmtAmount(result.base.servings)} serving{result.base.servings === 1 ? "" : "s"}
                 </div>
@@ -245,9 +285,14 @@ export default function CalculatorPage() {
                       : `${round(result.delta.calories) > 0 ? "+" : "−"}${Math.abs(round(result.delta.calories))} vs base`}
                   </span>
                 </div>
+                {calTier > 0 && (
+                  <div className="mt-2 inline-block rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold">
+                    ▲ {calOver.toLocaleString()} over your calorie goal for today
+                  </div>
+                )}
               </div>
               <div className="space-y-4 p-5">
-                <MacroRow m={result.portion} delta={result.delta} />
+                <MacroRow m={result.portion} delta={result.delta} tiers={tiers} />
                 <p className="text-sm leading-snug">{result.title}</p>
                 <div className="flex gap-2">
                   <button className="btn flex-1" onClick={copy}>Copy recipe</button>
@@ -271,7 +316,16 @@ export default function CalculatorPage() {
               </div>
             </div>
           )}
-          <p className="mt-3 text-center text-xs text-muted">Nothing here is saved — it&apos;s a calculator.</p>
+          <GramsToday
+            goals={grams.goals}
+            eaten={grams.eaten}
+            meal={meal}
+            count={grams.count}
+            loading={grams.loading}
+            error={grams.error}
+            logged={logged}
+          />
+          <p className="text-center text-xs text-muted">Nothing here is saved — it&apos;s a calculator.</p>
         </aside>
       </div>
 
@@ -280,6 +334,7 @@ export default function CalculatorPage() {
         <button
           onClick={() => document.getElementById("summary")?.scrollIntoView({ behavior: "smooth" })}
           className="fixed inset-x-3 bottom-3 z-20 flex items-baseline gap-2 rounded-2xl bg-ink px-4 py-3 text-left text-bg shadow-lg lg:hidden"
+          style={heroStyle}
         >
           <span className="tabular font-display text-3xl leading-none">{p.calories}</span>
           <span className="text-sm opacity-80">cal</span>

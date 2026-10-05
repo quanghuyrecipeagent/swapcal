@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compute, roundMacros, toGramsEntry, type CalcState } from "./calc";
+import { compute, overTier, roundMacros, toGramsEntry, type CalcState } from "./calc";
 import type { Base, Item } from "./types";
 
 const item = (id: string, kind: Item["kind"], size: number, unit: string, cal: number, p: number, c: number, f: number, fiber = 0): Item => ({
@@ -16,7 +16,7 @@ const items: Item[] = [
 ];
 
 const base: Base = {
-  id: "ic", name: "Ice cream", category: "Ice cream", servings: 2, notes: null, addons: [],
+  id: "ic", name: "Ice cream", category: "Ice cream", servings: 2, notes: null, addons: [], swaps: [],
   base_items: [
     { id: "b1", base_id: "ic", item_id: "milk", amount: 360, position: 0 },
     { id: "b2", base_id: "ic", item_id: "whey", amount: 31, position: 1 },
@@ -39,7 +39,7 @@ describe("compute", () => {
   it("swaps an ingredient using equivalent servings", () => {
     const r = compute(s({ edits: { b3: { swapToId: "allulose" } } }), [base], items)!;
     const line = r.lines.find((l) => l.key === "b3")!;
-    expect(line.amount).toBe(16); // 2 servings of allulose
+    expect(line.amount).toBe(8); // same unit → same amount
     expect(roundMacros(r.batch).calories).toBe(240);
     expect(r.title).toBe("Ice cream (w/ allulose)");
   });
@@ -87,5 +87,29 @@ describe("compute", () => {
     });
     expect(row.description).toContain("1 of 2 servings");
     expect(Number.isInteger(row.carbs)).toBe(true);
+  });
+
+  it("matches servings when units differ", () => {
+    const scoop = { ...items[1], id: "scoop", serving_size: 1, serving_unit: "scoop" };
+    const r = compute(s({ edits: { b2: { swapToId: "scoop" } } }), [base], [...items, scoop])!;
+    expect(r.lines.find((l) => l.key === "b2")!.amount).toBe(1);
+  });
+
+  it("lists a repeated add-on once in the name", () => {
+    const r = compute(
+      s({ extras: [{ key: "a", itemId: "pretzels", amount: 28 }, { key: "b", itemId: "pretzels", amount: 28 }] }),
+      [base], items,
+    )!;
+    expect(r.title).toBe("Ice cream + pretzels");
+  });
+});
+
+describe("overTier", () => {
+  it("is 0 within goal and steps up the further over", () => {
+    expect(overTier(2000, 2000)).toBe(0);
+    expect(overTier(2100, 2000)).toBe(1); // 5%
+    expect(overTier(2400, 2000)).toBe(2); // 20%
+    expect(overTier(2600, 2000)).toBe(3); // 30%
+    expect(overTier(5000, 0)).toBe(0); // no goal set
   });
 });

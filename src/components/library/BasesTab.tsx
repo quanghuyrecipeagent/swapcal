@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ItemPicker from "@/components/ItemPicker";
 import ItemForm, { blankDraft } from "./ItemForm";
+import BulkPanel from "./BulkPanel";
 import { createClient } from "@/lib/supabase/client";
 import { add, macrosFor, round, roundMacros, scaleMacros, ZERO } from "@/lib/calc";
 import { kindLabel, type Base, type Item } from "@/lib/types";
@@ -17,10 +18,11 @@ type BaseDraft = {
   notes: string;
   components: { key: string; item_id: string; amount: number }[];
   addons: string[]; // item ids, in order
+  swaps: Record<string, string[]>; // ingredient item id → allowed replacement ids
 };
 
 const blankBase = (category = ""): BaseDraft => ({
-  name: "", category, servings: 1, notes: "", components: [], addons: [],
+  name: "", category, servings: 1, notes: "", components: [], addons: [], swaps: {},
 });
 
 function toDraft(b: Base): BaseDraft {
@@ -34,6 +36,12 @@ function toDraft(b: Base): BaseDraft {
       .sort((x, y) => x.position - y.position)
       .map((c) => ({ key: c.id, item_id: c.item_id, amount: c.amount })),
     addons: [...b.addons].sort((x, y) => x.position - y.position).map((a) => a.item_id),
+    swaps: [...b.swaps]
+      .sort((x, y) => x.position - y.position)
+      .reduce<Record<string, string[]>>((acc, w) => {
+        (acc[w.item_id] ??= []).push(w.swap_id);
+        return acc;
+      }, {}),
   };
 }
 
@@ -48,7 +56,12 @@ export default function BasesTab({
 }) {
   const [draft, setDraft] = useState<BaseDraft | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const toggleSel = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const stopSelecting = () => { setSelecting(false); setSelected([]); };
 
   const categories = useMemo(() => {
     const set = new Set(bases.map((b) => b.category));
@@ -84,11 +97,32 @@ export default function BasesTab({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary" onClick={() => setDraft(blankBase())}>New base</button>
+        {bases.length > 1 && (
+          <button className={`btn ${selecting ? "border-accent text-accent" : ""}`} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+            {selecting ? "Done selecting" : "Select bases"}
+          </button>
+        )}
+        {selecting && (
+          <button className="text-sm text-muted hover:text-ink" onClick={() => setSelected(selected.length === bases.length ? [] : bases.map((b) => b.id))}>
+            {selected.length === bases.length ? "Select none" : "Select all"}
+          </button>
+        )}
         <span className="text-sm text-muted">
-          A base is any recipe you build on — ice cream, yogurt, cream of rice, oatmeal… Each one keeps its own add-ons.
+          {selecting
+            ? "Tap bases to select them, then add add-ons or swap options to all of them at once."
+            : "A base is any recipe you build on — ice cream, yogurt, cream of rice, oatmeal… Each one keeps its own add-ons."}
         </span>
       </div>
       {msg && <p className="text-sm text-bad">{msg}</p>}
+      {note && <p className="rounded-lg bg-surface px-3 py-2 text-sm text-good">{note}</p>}
+      {selecting && selected.length > 0 && (
+        <BulkPanel
+          bases={bases.filter((b) => selected.includes(b.id))}
+          items={items}
+          onClear={() => setSelected([])}
+          onDone={async (m) => { await reload(); setNote(m); }}
+        />
+      )}
       {bases.length === 0 && (
         <div className="card p-6 text-sm text-muted">
           No bases yet. Start with one you make often, add its ingredients, then pick the mix-ins and toppings that go with it.
@@ -106,9 +140,19 @@ export default function BasesTab({
               .map((b) => {
                 const tot = totalFor(b.base_items);
                 return (
-                  <li key={b.id} className="card p-4">
+                  <li
+                    key={b.id}
+                    className={`card p-4 ${selecting ? "cursor-pointer" : ""} ${selected.includes(b.id) ? "border-accent ring-1 ring-accent" : ""}`}
+                    onClick={selecting ? () => toggleSel(b.id) : undefined}
+                  >
                     <div className="flex items-start gap-3">
+                      {selecting && (
+                        <span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${selected.includes(b.id) ? "border-accent bg-accent text-[var(--accent-ink)]" : "border-line"}`}>
+                          {selected.includes(b.id) ? "✓" : ""}
+                        </span>
+                      )}
                       <h4 className="mr-auto text-lg font-medium leading-snug">{b.name}</h4>
+                      {!selecting && <>
                       <button className="text-sm text-muted hover:text-ink" onClick={() => setDraft(toDraft(b))}>Edit</button>
                       <button
                         className="text-sm text-muted hover:text-ink"
@@ -117,12 +161,15 @@ export default function BasesTab({
                         Duplicate
                       </button>
                       <button className="text-sm text-muted hover:text-bad" onClick={() => remove(b)}>Delete</button>
+                      </>}
                     </div>
                     <p className="tabular mt-1 text-sm text-muted">
                       {round(tot.calories / b.servings)} cal / serving · makes {round(b.servings, 2)}
                     </p>
                     <p className="mt-2 text-xs text-muted">
-                      {b.base_items.length} ingredients · {b.addons.length} add-ons
+                      {b.base_items.length} ingredients
+                      {b.swaps.length > 0 && ` · ${b.swaps.length} swap option${b.swaps.length === 1 ? "" : "s"}`}
+                      {` · ${b.addons.length} add-on${b.addons.length === 1 ? "" : "s"}`}
                       {b.addons.length > 0 && (
                         <>
                           {": "}
@@ -164,6 +211,8 @@ function BaseEditor({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [picker, setPicker] = useState<"ingredients" | "addons" | null>(initial.components.length ? null : "ingredients");
+  const [swapPickerFor, setSwapPickerFor] = useState<string | null>(null); // component key
+  const setSwaps = (itemId: string, ids: string[]) => setD((x) => ({ ...x, swaps: { ...x.swaps, [itemId]: ids } }));
   const [creating, setCreating] = useState<"ingredients" | "addons" | null>(null);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const [pendingIngredient, setPendingIngredient] = useState<string | null>(null);
@@ -206,7 +255,7 @@ function BaseEditor({
     if (id) {
       const { error } = await sb.from("swapcal_bases").update(row).eq("id", id);
       if (error) return fail(error.message);
-      for (const table of ["swapcal_base_items", "swapcal_base_addons"]) {
+      for (const table of ["swapcal_base_items", "swapcal_base_addons", "swapcal_base_swaps"]) {
         const del = await sb.from(table).delete().eq("base_id", id);
         if (del.error) return fail(del.error.message);
       }
@@ -224,6 +273,16 @@ function BaseEditor({
         .from("swapcal_base_addons")
         .insert(d.addons.map((item_id, i) => ({ base_id: id, item_id, position: i })));
       if (a.error) return fail(a.error.message);
+    }
+    const present = new Set(d.components.map((c) => c.item_id));
+    const swapRows = Object.entries(d.swaps)
+      .filter(([itemId]) => present.has(itemId))
+      .flatMap(([item_id, ids]) =>
+        ids.filter((sid) => sid !== item_id).map((swap_id, position) => ({ base_id: id, item_id, swap_id, position })),
+      );
+    if (swapRows.length) {
+      const w = await sb.from("swapcal_base_swaps").insert(swapRows);
+      if (w.error) return fail(w.error.message);
     }
     setBusy(false);
     await reload();
@@ -278,8 +337,10 @@ function BaseEditor({
           {d.components.map((c) => {
             const it = byId.get(c.item_id);
             if (!it) return null;
+            const swapIds = d.swaps[it.id] ?? [];
             return (
-              <li key={c.key} className="flex items-center gap-3 py-2">
+              <li key={c.key} className="py-2">
+                <div className="flex items-center gap-3">
                 <span className="min-w-0 flex-1">
                   {it.name}
                   {it.kind !== "ingredient" && <span className="chip ml-2 align-middle">{kindLabel(it.kind)}</span>}
@@ -290,6 +351,39 @@ function BaseEditor({
                 <span className="tabular w-14 text-right text-sm">{round(macrosFor(it, c.amount).calories)}</span>
                 <button className="text-muted hover:text-bad" aria-label="Remove"
                   onClick={() => setD({ ...d, components: d.components.filter((x) => x.key !== c.key) })}>×</button>
+                </div>
+                {/* allowed swaps for this ingredient */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-3 text-xs">
+                  <span className="text-muted">Can swap for:</span>
+                  {swapIds.length === 0 && <span className="text-muted italic">nothing yet</span>}
+                  {swapIds.map((sid) => {
+                    const sw = byId.get(sid);
+                    if (!sw) return null;
+                    return (
+                      <span key={sid} className="flex items-center gap-1 rounded-full border border-line bg-bg py-0.5 pl-2 pr-1">
+                        {sw.name}
+                        <button className="text-muted hover:text-bad" aria-label={`Remove swap ${sw.name}`}
+                          onClick={() => setSwaps(it.id, swapIds.filter((x) => x !== sid))}>×</button>
+                      </span>
+                    );
+                  })}
+                  <button className="chip border-dashed hover:border-accent hover:text-accent"
+                    onClick={() => setSwapPickerFor(swapPickerFor === c.key ? null : c.key)}>
+                    {swapPickerFor === c.key ? "Done" : "+ swap option"}
+                  </button>
+                </div>
+                {swapPickerFor === c.key && (
+                  <div className="ml-3 mt-2 rounded-xl border border-line p-3">
+                    <ItemPicker
+                      compact
+                      baseFirst
+                      items={items}
+                      defaultKind={it.kind}
+                      exclude={[it.id, ...swapIds]}
+                      onPick={(pick) => setSwaps(it.id, [...swapIds, pick.id])}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -355,7 +449,7 @@ function BaseEditor({
           <div className="card max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-b-none p-5 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <ItemForm
               items={items}
-              initial={blankDraft(creating === "addons" ? "topping" : "ingredient")}
+              initial={blankDraft(creating === "addons" ? "mixin" : "ingredient")}
               title={creating === "addons" ? "New add-on" : "New ingredient"}
               onCancel={() => setCreating(null)}
               onSaved={async (id) => {

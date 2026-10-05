@@ -6,7 +6,7 @@
 export type ItemKind = string;
 
 export const BASE_KINDS = ["ingredient", "protein"] as const;
-export const DEFAULT_KINDS = ["protein", "mixin", "topping", "sauce", "ingredient"] as const;
+export const DEFAULT_KINDS = ["protein", "mixin", "sauce", "ingredient"] as const;
 
 export function isBaseKind(kind: string): boolean {
   return (BASE_KINDS as readonly string[]).includes(kind);
@@ -15,8 +15,7 @@ export function isBaseKind(kind: string): boolean {
 const LABELS: Record<string, string> = {
   ingredient: "Ingredient",
   protein: "Protein",
-  mixin: "Mix-in",
-  topping: "Topping",
+  mixin: "Mix-in/Topping",
   sauce: "Sauce",
 };
 
@@ -25,6 +24,7 @@ export function kindLabel(kind: string): string {
 }
 
 export function kindPlural(kind: string): string {
+  if (kind === "mixin") return "Mix-ins/Toppings";
   const l = kindLabel(kind);
   return /[sxz]$|ch$|sh$/i.test(l) ? l + "es" : l + "s";
 }
@@ -32,7 +32,7 @@ export function kindPlural(kind: string): string {
 /** Normalise what the user typed into a category key. */
 export function normalizeKind(raw: string): string {
   const k = raw.trim().toLowerCase().replace(/\s+/g, " ");
-  if (k === "mix-in" || k === "mix in" || k === "mixins" || k === "mix-ins") return "mixin";
+  if (/^(mix-?\s?ins?|toppings?|mix-?ins?\/toppings?|mix-?in\/topping)$/.test(k)) return "mixin";
   if (k.endsWith("s") && LABELS[k.slice(0, -1)]) return k.slice(0, -1);
   return k;
 }
@@ -78,6 +78,13 @@ export interface BaseAddon {
   position: number;
 }
 
+export interface BaseSwap {
+  base_id: string;
+  item_id: string; // ingredient in the base
+  swap_id: string; // allowed replacement
+  position: number;
+}
+
 export interface Base {
   id: string;
   name: string;
@@ -86,4 +93,5 @@ export interface Base {
   notes: string | null;
   base_items: BaseItem[];
   addons: BaseAddon[];
+  swaps: BaseSwap[];
 }

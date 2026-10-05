@@ -21,6 +21,7 @@ export default function ItemPicker({
   pinnedIds,
   pinnedLabel = "Goes with this base",
   emptyPinnedHint,
+  selectedIds,
 }: {
   items: Item[];
   onPick: (item: Item) => void;
@@ -33,6 +34,8 @@ export default function ItemPicker({
   pinnedIds?: string[];
   pinnedLabel?: string;
   emptyPinnedHint?: React.ReactNode;
+  /** Multi-select mode: rows show a checkbox; onPick toggles. */
+  selectedIds?: string[];
 }) {
   const hasPinned = pinnedIds !== undefined;
   const [scope, setScope] = useState<"pinned" | "all">(
@@ -91,7 +94,7 @@ export default function ItemPicker({
       )}
       <input
         className="input w-full"
-        placeholder={scope === "pinned" ? "Search this base's add-ons…" : "Search library…"}
+        placeholder={scope === "pinned" ? `Search ${pinnedLabel.replace(/ \(.*\)$/, "").toLowerCase()}…` : "Search library…"}
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -115,13 +118,22 @@ export default function ItemPicker({
             {scope === "pinned" && !q && emptyPinnedHint ? emptyPinnedHint : "Nothing matches."}
           </li>
         )}
-        {list.map((i) => (
+        {list.map((i) => {
+          const checked = selectedIds?.includes(i.id);
+          return (
           <li key={i.id}>
             <button
               type="button"
+              role={selectedIds ? "checkbox" : undefined}
+              aria-checked={selectedIds ? checked : undefined}
               onClick={() => onPick(i)}
-              className="flex w-full items-center gap-3 py-2 text-left hover:text-accent"
+              className={`flex w-full items-center gap-3 py-2 text-left hover:text-accent ${checked ? "text-accent" : ""}`}
             >
+              {selectedIds && (
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? "border-accent bg-accent text-[var(--accent-ink)]" : "border-line"}`}>
+                  {checked ? "✓" : ""}
+                </span>
+              )}
               <span className="min-w-0 flex-1 truncate">
                 {i.name}
                 {activeKind === "all" && !isBaseKind(i.kind) && kinds.length > 1 && (
@@ -131,10 +143,11 @@ export default function ItemPicker({
               <span className="tabular shrink-0 text-xs text-muted">
                 {round(i.calories)} cal / {round(i.serving_size, 1)} {i.serving_unit}
               </span>
-              <span className="text-lg leading-none text-accent">+</span>
+              {!selectedIds && <span className="text-lg leading-none text-accent">+</span>}
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );

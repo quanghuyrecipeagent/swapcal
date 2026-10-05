@@ -16,6 +16,7 @@ SwapCal lives in **the same Supabase project as GRAMS** (nutriai-tracker), so yo
 1. Open the GRAMS project (`zadiqpsrtkuxjsvyyncb`) → SQL editor.
 2. Paste and run `supabase/migrations/0001_init.sql`. It only creates new `swapcal_*` tables; it doesn't touch any GRAMS table.
 3. Run `supabase/migrations/0002_groups_addons_categories.sql` the same way (safe to re-run).
+   Then `supabase/migrations/0003_swaps_and_mixins.sql` (merges toppings into Mix-ins/Toppings, adds per-ingredient swap lists; safe to re-run).
 4. Optional starter library: put your GRAMS email into `supabase/seed_example.sql` and run it. It adds four bases (ice cream, yogurt bowl, cream of rice, oatmeal), each with its own add-ons, four protein powders, and a homemade PB2 sauce. The macros are typical label values; check them against what you buy.
 
 ### 2. Local
@@ -39,6 +40,10 @@ A base is any recipe you build on: ice cream, a yogurt bowl, cream of rice, oatm
 - its **ingredients** with batch amounts and a "makes N servings" number,
 - its own **add-ons**: the mix-ins, toppings and sauces that go with it. The calculator opens on that list, with a toggle to the whole library.
 
+Each ingredient in a base has its own **swap list** ("Can swap for: Fairlife milk, Water"). In the calculator, Swap opens on just that list, with a toggle to the whole library. Swapping between items with the same unit keeps the amount (40 g flour → 40 g oat flour); different units match servings.
+
+**Select bases** lets you tick several bases and, in one go, add or remove add-ons on all of them, or give one ingredient (say, your whey) the same swap options in every selected base that uses it.
+
 **Duplicate** a base to make a variation (chocolate vs vanilla ice cream) without re-entering everything.
 
 ### Ingredients & add-ons
@@ -48,7 +53,7 @@ Every item has nutrition per serving (calories, protein, carbs, fat, fiber) and 
 |---|---|
 | **Protein** | Protein powders, one entry per brand/flavor. Swapping the protein in a base shows only proteins. |
 | **Ingredient** | Everything else that goes into bases. |
-| **Mix-in, Topping, Sauce** | Built-in add-on categories. |
+| **Mix-ins/Toppings, Sauce** | Built-in add-on categories (mix-ins and toppings are one category). |
 | **Your own** | Tap **+ New category** (Drizzle, Crunch, Fruit…). |
 
 Three ways to add items:
@@ -66,6 +71,10 @@ From inside a base editor, **New item / New add-on** opens the same form and att
 - Nothing in the calculator is saved.
 
 ---
+
+## Today in GRAMS panel
+
+The calculator shows today's GRAMS totals (from `food_entries`) against your GRAMS `goals`: eaten so far, plus this meal, with a goal marker. If adding the meal would put a macro over goal, that number turns red in the summary and the panel, darker the further over: up to 10%, up to 25%, and beyond. The amount over is always written out too, so it never depends on colour alone. GRAMS has no fiber goal, so fiber is shown as a plain total. The panel refreshes after you log and whenever you come back to the tab.
 
 ## GRAMS integration
 
@@ -89,11 +98,14 @@ It never writes to `saved_foods`, so your GRAMS library doesn't fill up with nea
 ```
 supabase/migrations/0001_init.sql   swapcal_items, swapcal_bases, swapcal_base_items + RLS
 supabase/migrations/0002_*.sql      base categories, per-base add-ons, custom item categories, built items
+supabase/migrations/0003_*.sql      mix-ins/toppings merged, per-ingredient swap lists
 supabase/seed_example.sql           optional starter library
 src/lib/calc.ts                     all calculator math + export formats (tested)
 src/app/page.tsx                    calculator
 src/app/library/page.tsx            library shell
-src/components/library/             BasesTab (base editor + add-ons), ItemsTab, ItemForm, paste import
+src/components/library/             BasesTab (base editor, swap lists), BulkPanel, ItemsTab, ItemForm, paste import
+src/components/GramsToday.tsx       today-in-GRAMS panel + over-goal tiers
+src/lib/grams.ts                    reads GRAMS goals + today's entries
 src/lib/importer.ts                 paste/CSV parser (tested)
 src/middleware.ts                   auth gate (redirects to /login)
 ```

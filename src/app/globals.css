@@ -11,6 +11,16 @@
   --good: #3f7d4e;
   --bad: #b4372b;
   --swap: #8a5a12;
+  /* over-goal reds: text on surface, darker the further over */
+  --over-1: #d92d20;
+  --over-2: #a8180e;
+  --over-3: #6e0d07;
+  /* over-goal fills behind white text (hero number) */
+  --over-bg-1: #c4271b;
+  --over-bg-2: #921a11;
+  --over-bg-3: #5e0d08;
+  --meal: var(--accent);
+  --eaten: #b9ab98;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +35,13 @@
     --good: #7fc28f;
     --bad: #f08a7e;
     --swap: #e0b062;
+    --over-1: #ff9387;
+    --over-2: #ff6a5c;
+    --over-3: #f2402f;
+    --over-bg-1: #c4271b;
+    --over-bg-2: #921a11;
+    --over-bg-3: #5e0d08;
+    --eaten: #5d5346;
   }
 }
 
@@ -38,6 +55,9 @@
   --color-good: var(--good);
   --color-bad: var(--bad);
   --color-swap: var(--swap);
+  --color-over-1: var(--over-1);
+  --color-over-2: var(--over-2);
+  --color-over-3: var(--over-3);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
 }

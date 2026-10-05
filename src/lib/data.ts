@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "./supabase/client";
-import type { Base, Item } from "./types";
+import { normalizeKind, type Base, type Item } from "./types";
 
 export function useLibrary() {
   const [items, setItems] = useState<Item[]>([]);
@@ -19,7 +19,7 @@ export function useLibrary() {
         .order("name"),
       sb
         .from("swapcal_bases")
-        .select("*, base_items:swapcal_base_items(*), addons:swapcal_base_addons(*)")
+        .select("*, base_items:swapcal_base_items(*), addons:swapcal_base_addons(*), swaps:swapcal_base_swaps(*)")
         .order("category")
         .order("name"),
     ]);
@@ -27,6 +27,7 @@ export function useLibrary() {
     else {
       const num = (x: Item): Item => ({
         ...x,
+        kind: normalizeKind(x.kind),
         serving_size: Number(x.serving_size),
         calories: Number(x.calories),
         protein: Number(x.protein),
@@ -44,6 +45,7 @@ export function useLibrary() {
           servings: Number(x.servings),
           base_items: (x.base_items ?? []).map((c) => ({ ...c, amount: Number(c.amount) })),
           addons: x.addons ?? [],
+          swaps: x.swaps ?? [],
         })),
       );
       setError(null);
@@ -60,7 +62,7 @@ export function useLibrary() {
 
 /** All categories in use, with the defaults first. */
 export function allKinds(items: Item[]): string[] {
-  const set = new Set<string>(["protein", "mixin", "topping", "sauce", "ingredient"]);
+  const set = new Set<string>(["protein", "mixin", "sauce", "ingredient"]);
   items.forEach((i) => set.add(i.kind));
   return [...set];
 }

@@ -37,6 +37,9 @@ export function macrosFor(item: Item, amount: number): Macros {
  * Used as the default when swapping one ingredient for another.
  */
 export function equivalentAmount(from: Item, amount: number, to: Item): number {
+  // same unit (g → g, ml → ml): keep the amount — 40 g flour becomes 40 g oat flour
+  if (from.serving_unit.trim().toLowerCase() === to.serving_unit.trim().toLowerCase()) return amount;
+  // different units: match the number of servings
   const servings = amount / from.serving_size;
   return round(servings * to.serving_size, 1);
 }
@@ -168,7 +171,7 @@ export function compute(
   const originalPortion = scaleMacros(original, portionFactor);
 
   const parts: string[] = [base.name];
-  if (addedNames.length) parts.push(`+ ${addedNames.join(", ")}`);
+  if (addedNames.length) parts.push(`+ ${[...new Set(addedNames)].join(", ")}`);
   if (swapNames.length) parts.push(`(w/ ${swapNames.join(", ")})`);
   if (removedNames.length) parts.push(`(no ${removedNames.join(", ")})`);
 
@@ -304,4 +307,19 @@ export function builtItemMacros(
   const perServing =
     recipeYield > 0 && servingSize > 0 ? scaleMacros(total, servingSize / recipeYield) : ZERO;
   return { total, perServing };
+}
+
+// ---------------------------------------------------------------------------
+// Over-goal levels (used to tint numbers red, darker the further over).
+// ---------------------------------------------------------------------------
+
+/** 0 = within goal, 1 = up to 10% over, 2 = up to 25% over, 3 = more. */
+export type OverTier = 0 | 1 | 2 | 3;
+
+export function overTier(total: number, goal: number | null | undefined): OverTier {
+  if (!goal || goal <= 0) return 0;
+  const over = Math.round(total) - goal;
+  if (over <= 0) return 0;
+  const r = over / goal;
+  return r <= 0.1 ? 1 : r <= 0.25 ? 2 : 3;
 }
